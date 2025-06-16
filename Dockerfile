@@ -5,33 +5,22 @@ FROM python:3.9-slim
 WORKDIR /app
 
 # Copia el archivo de requisitos
-COPY requirements.txt .
+COPY requirements.txt requirements.txt
 
-# Instala las dependencias del sistema necesarias para osmnx
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    libgeos-dev \
-    libproj-dev \
-    proj-data \
-    proj-bin \
-    libspatialindex-dev \
-    libgdal-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-# Instala las dependencias de Python
+# Instala las dependencias
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copia el resto de la aplicación
+# Copia el resto de la aplicación al directorio de trabajo
 COPY . .
 
 # Expone el puerto en el que correrá la aplicación
 EXPOSE 8000
 
-# Variable de entorno para producción
+# Define la variable de entorno para que Flask se ejecute en modo producción
 ENV FLASK_ENV=production
 
-# Comando para ejecutar Gunicorn (mejor para producción que `python app.py`)
-CMD ["gunicorn", "-b", "0.0.0.0:5000", "app:app"]
+# Comando para ejecutar la aplicación
+CMD ["python", "app.py"]
 
 
 
