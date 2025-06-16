@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Planificador de Rutas</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet-routing-machine/3.2.12/leaflet-routing-machine.css"/>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"/>
+  <style>
+    body { margin: 0; display: flex; height: 100vh; font-family: 'Segoe UI', sans-serif; }
+    #panel-control { width: 350px; background-color: #faf5ff; padding: 1rem; box-shadow: 2px 0 8px rgba(0, 0, 0, 0.1); overflow-y: auto; }
+    #mapa { flex: 1; z-index: 0; }
+    .btn-morado { background-color: #9c27b0; border-color: #9c27b0; color: white; }
+    .btn-morado:hover { background-color: #7b1fa2; border-color: #7b1fa2; }
+    #resultados { background-color: #f3e5f5; padding: 1rem; margin-top: 1rem; border-radius: 8px; }
+    #listaPuntos { margin-top: 1rem; }
+    #listaPuntos ol { padding-left: 1.2rem; }
+    label { font-weight: 500; margin-top: 0.5rem; }
+    h4 { font-weight: bold; margin-bottom: 1rem; color: #6a1b9a; }
+    .form-select { margin-bottom: 0.5rem; }
+    .ui-autocomplete {
+      z-index: 9999 !important;
+      position: absolute;
+      background-color: white;
+      border: 1px solid #ccc;
+      padding: 0.5rem;
+      list-style: none;
+      max-height: 200px;
+      overflow-y: auto;
+      width: 100%;
+    }
+    .ui-menu-item-wrapper {
+      padding: 0.4rem;
+      cursor: pointer;
+    }
+    .ui-menu-item-wrapper:hover {
+      background-color: #e1bee7;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="panel-control">
+    <h4>Planificador de Rutas</h4>
+    <input type="text" class="form-control entrada-ubicacion mb-2" placeholder="Buscar lugar..." />
+    <button class="btn btn-morado w-100 mb-2" onclick="agregarRuta()">Agregar Ruta</button>
+    <button class="btn btn-outline-danger w-100 mb-2" onclick="borrarPuntos()">Borrar Todos</button>
+    <button class="btn btn-outline-warning w-100 mb-2" onclick="borrarUltimoPunto()">Borrar Último</button>
+    <button class="btn btn-outline-secondary w-100 mb-2" onclick="activarSeleccionMapa()">Seleccionar desde Mapa</button>
+    <button class="btn btn-success w-100 mb-3" onclick="actualizarRuta()">Iniciar Ruta</button>
+
+    <label for="tipoTransporte">Tipo de transporte:</label>
+    <select class="form-select" id="tipoTransporte" onchange="actualizarRuta()">
+      <option value="auto">Automóvil</option>
+      <option value="moto">Motocicleta</option>
+      <option value="camioneta">Camioneta</option>
+    </select>
+
+    <label for="tipoGasolina">Tipo de gasolina:</label>
+    <select class="form-select" id="tipoGasolina" onchange="actualizarRuta()">
+      <option value="magna">Magna ($23.49)</option>
+      <option value="premium">Premium ($25.99)</option>
+      <option value="diesel">Diésel ($25.15)</option>
+    </select>
+
+    <div id="resultados">
+      <div id="distancia">Distancia: -</div>
+      <div id="tiempo">Tiempo estimado: -</div>
+      <div id="gasolina">Consumo: -</div>
+      <div id="costo">Costo total: -</div>
+    </div>
+
+    <div id="listaPuntos">
+      <p><strong>Coordenadas seleccionadas:</strong></p>
+      <ol id="ordenPuntos"></ol>
+    </div>
+  </div>
+
+  <div id="mapa"></div>
+
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <script src="https://code.jquery.com/ui/1.12.1/jquery-ui.min.js"></script>
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet-routing-machine/dist/leaflet-routing-machine.js"></script>
+
+  <script>
+    let mapa = L.map('mapa').setView([19.43, -99.13], 12);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap contributors'
+    }).addTo(mapa);
+
+    let controlRuta;
+    let puntosIntermedios = [];
+    let marcadores = [];
+    let seleccionMapaHabilitada = false;
+
+    const preciosGasolina = { magna: 23.49, premium: 25.99, diesel: 25.15 };
+    const consumosPorTransporte = { auto: 10, moto: 25, camioneta: 8 };
+
+    function agregarRuta() {
+      let entrada = document.querySelector('.entrada-ubicacion');
+      let ubicacion = entrada.value.trim();
+      if (!ubicacion) return;
+
+      $.getJSON(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(ubicacion)}`, function (data) {
+        if (data && data.length > 0) {
+          let latLng = L.latLng(data[0].lat, data[0].lon);
+          puntosIntermedios.push({ coords: latLng, nombre: ubicacion });
+          agregarMarcador(latLng, ubicacion);
+          actualizarListaPuntos();
+        } else {
+          alert('Lugar no encontrado.');
+        }
+      });
+      entrada.value = '';
+    }
+
+    function agregarMarcador(latLng, texto) {
+      let marcador = L.marker(latLng, { draggable: true }).addTo(mapa);
+      marcador.bindPopup(texto).openPopup();
+      marcador.on('dragend', function () {
+        let idx = marcadores.indexOf(marcador);
+        if (idx !== -1) {
+          puntosIntermedios[idx].coords = marcador.getLatLng();
+          actualizarRuta();
+          actualizarListaPuntos();
+        }
+      });
+      marcadores.push(marcador);
+    }
+
+    function actualizarRuta() {
+      if (controlRuta) mapa.removeControl(controlRuta);
+      if (puntosIntermedios.length > 1) {
+        const waypoints = puntosIntermedios.map(p => p.coords);
+        controlRuta = L.Routing.control({
+          waypoints,
+          routeWhileDragging: false,
+          router: L.Routing.osrmv1({ language: 'es' }),
+          createMarker: () => null,
+          lineOptions: { styles: [{ color: 'purple', opacity: 1, weight: 5 }] },
+        }).on('routesfound', function (e) {
+          let resumen = e.routes[0].summary;
+          let distancia = resumen.totalDistance / 1000;
+          let tiempoMin = resumen.totalTime / 60;
+
+          let tipoTransporte = document.getElementById('tipoTransporte').value;
+          let tipoGasolina = document.getElementById('tipoGasolina').value;
+
+          let litros = (distancia * consumosPorTransporte[tipoTransporte]) / 100;
+          let costoGasolina = litros * preciosGasolina[tipoGasolina];
+
+          let costoTotal = costoGasolina;
+
+          document.getElementById('distancia').innerText = `Distancia: ${distancia.toFixed(2)} km`;
+          document.getElementById('tiempo').innerText = `Tiempo estimado: ${tiempoMin.toFixed(0)} min`;
+          document.getElementById('gasolina').innerText = `Consumo: ${litros.toFixed(2)} L`;
+          document.getElementById('costo').innerText = `Costo total: $${costoTotal.toFixed(2)} MXN`;
+        }).addTo(mapa);
+
+        mapa.fitBounds(L.latLngBounds(waypoints));
+      } else {
+        document.getElementById('distancia').innerText = 'Distancia: -';
+        document.getElementById('tiempo').innerText = 'Tiempo estimado: -';
+        document.getElementById('gasolina').innerText = 'Consumo: -';
+        document.getElementById('costo').innerText = 'Costo total: -';
+      }
+    }
+
+    function activarSeleccionMapa() {
+      seleccionMapaHabilitada = true;
+      alert('Haz clic en el mapa para agregar un punto.');
+    }
+
+    mapa.on('click', function(e) {
+      if (seleccionMapaHabilitada) {
+        const coords = e.latlng;
+        const nombre = `Punto ${puntosIntermedios.length + 1}`;
+        puntosIntermedios.push({ coords, nombre });
+        agregarMarcador(coords, nombre);
+        actualizarListaPuntos();
+        seleccionMapaHabilitada = false;
+      }
+    });
+
+    $(document).on('focus', '.entrada-ubicacion', function () {
+      $(this).autocomplete({
+        source: function (request, response) {
+          $.getJSON(`https://nominatim.openstreetmap.org/search?format=json&limit=5&q=${encodeURIComponent(request.term)}`, function (data) {
+            response(data.map(item => ({ label: item.display_name, value: item.display_name })));
+          });
+        },
+        minLength: 3
+      });
+    });
+
+    function actualizarListaPuntos() {
+      let lista = document.getElementById('ordenPuntos');
+      lista.innerHTML = '';
+      puntosIntermedios.forEach((punto, index) => {
+        let item = document.createElement('li');
+        item.textContent = `${punto.nombre}: ${punto.coords.lat.toFixed(5)}, ${punto.coords.lng.toFixed(5)}`;
+        lista.appendChild(item);
+      });
+    }
+
+    function borrarPuntos() {
+      marcadores.forEach(m => mapa.removeLayer(m));
+      marcadores = [];
+      puntosIntermedios = [];
+      if (controlRuta) {
+        mapa.removeControl(controlRuta);
+        controlRuta = null;
+      }
+      document.getElementById('ordenPuntos').innerHTML = '';
+      document.getElementById('distancia').innerText = 'Distancia: -';
+      document.getElementById('tiempo').innerText = 'Tiempo estimado: -';
+      document.getElementById('gasolina').innerText = 'Consumo: -';
+      document.getElementById('costo').innerText = 'Costo total: -';
+    }
+
+    function borrarUltimoPunto() {
+      if (puntosIntermedios.length === 0) return;
+      let ultimoMarcador = marcadores.pop();
+      mapa.removeLayer(ultimoMarcador);
+      puntosIntermedios.pop();
+      actualizarListaPuntos();
+      actualizarRuta();
+    }
+  </script>
+</body>
+</html>
