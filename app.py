@@ -48,4 +48,5 @@ def calcular_ruta_optima_dijkstra(ubicaciones):
     return [ubicaciones[nodo] for nodo in ruta_optima_dijkstra]
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    port int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=True)
