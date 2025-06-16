@@ -22,5 +22,4 @@ ENV FLASK_ENV=production
 # Comando para ejecutar la aplicación
 CMD ["python", "app.py"]
 
-RUN pip install --no-cache-dir folium
 
